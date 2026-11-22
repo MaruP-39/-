@@ -161,6 +161,10 @@ button.is-on {
   background: var(--accent-soft);
   border-color: var(--accent-strong);
 }
+a.button {
+  color: var(--text);
+  text-decoration: none;
+}
 label.file input[type="file"] {
   display: none;
 }
