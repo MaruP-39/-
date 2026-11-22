@@ -16,4 +16,4 @@
 
 ## 사이트를 수정한 뒤 갱신하기
 
-새 `index.html`을 이 폴더에 덮어쓴 뒤 같은 명령을 다시 실행합니다.
+바뀐 파일(`index.html`, `style.css`, `app.js`, `karaoke-text.js`, `waveform.js`)을 이 폴더에 덮어쓴 뒤 같은 명령을 다시 실행합니다.
