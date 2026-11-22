@@ -502,7 +502,7 @@ details.more .field {
 .cue {
   width: 100%;
   display: grid;
-  grid-template-columns: 34px 92px 1fr 22px;
+  grid-template-columns: 34px 92px 1fr 34px;
   gap: 8px;
   align-items: center;
   min-height: 40px;
@@ -1120,4 +1120,61 @@ details.more .field {
   .actions button {
     flex: 1;
   }
+}
+
+/* ===== 탭 지연 보정 ===== */
+.tap-calibration {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0b1320;
+}
+.tap-calibration .field input[type="number"] {
+  max-width: 120px;
+}
+.tap-pad {
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px dashed #2c4668;
+  cursor: pointer;
+  user-select: none;
+}
+.tap-pad .note {
+  margin: 0;
+}
+
+/* ===== 파트 ===== */
+.part-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.part-row .field {
+  flex: 1;
+}
+.part-grid {
+  display: grid;
+  grid-template-columns: 1fr 90px;
+  gap: 10px;
+  margin: 10px 0 14px;
+}
+.part-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 3px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.library-backup {
+  margin: -6px 0 12px;
+}
+.button.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
 }

@@ -59,6 +59,13 @@
     fillMode: "sweep",
     countdown: true,
     countdownGap: 5,
+    tapOffset: 0,
+    part1Name: "파트 1",
+    part1Color: "#9FD8FF",
+    part2Name: "파트 2",
+    part2Color: "#FFB3D9",
+    part3Name: "함께",
+    part3Color: "#C9F2A8",
     showTranslation: false,
     centerKorean: false,
     lyricOrder: ["reading", "japanese", "translation"],
@@ -71,6 +78,7 @@
     "showMilliseconds",
     "followPlayback",
     "autoStartTopAfterGap",
+    "tapOffset",
   ];
   const runtimeFontNames = new Set(),
     resolvedFonts = new Map(),
@@ -159,7 +167,11 @@
     waveEdit = null,
     syllableTap = null;
   const settingIds = Object.keys(defaults).filter((id) => typeof defaults[id] === "number");
+  const partNumbers = [1, 2, 3];
   const colorSettingIds = [
+    "part1Color",
+    "part2Color",
+    "part3Color",
     "jpPrimary",
     "jpSecondary",
     "koreanColor",
@@ -376,6 +388,7 @@
         marked: cue.marked === true || (cue.marked !== false && +cue.end > +cue.start),
         startTop: cue.startTop === true,
         manualEnd: cue.manualEnd === true,
+        part: [1, 2, 3].includes(+cue.part) ? +cue.part : 0,
         importedPreviewStart:
           cue.importedPreviewStart !== null &&
           cue.importedPreviewStart !== undefined &&
@@ -532,6 +545,7 @@
             ? source.startTop
             : index > 0 && event.position === "7" && previous?.position === "7",
         manualEnd: source?.manualEnd === true,
+        part: [1, 2, 3].includes(+source?.part) ? +source.part : 0,
         importedPreviewStart: preview?.start ?? null,
         japanese: japaneseText,
         reading: r?.plain || "",
@@ -780,8 +794,15 @@
       text.textContent = furiganaBase(c.japanese) || c.translation || "(빈 줄)";
       const flags = document.createElement("span");
       flags.className = "flags";
+      if (partColor(c)) {
+        const dot = document.createElement("span");
+        dot.className = "part-dot";
+        dot.style.background = partColor(c);
+        dot.title = project.settings[`part${c.part}Name`];
+        flags.append(dot);
+      }
       if (validSegments(c)) {
-        flags.textContent = "♪";
+        flags.append("♪");
         flags.title = "음절 타이밍 있음";
       }
       b.append(n, t, text, flags);
@@ -835,9 +856,26 @@
   }
   function renderEditor() {
     const c = project.cues[selected];
-    for (const id of ["cueStart", "cueEnd", "cueJapanese", "cueReading", "cueTranslation", "cueEnabled", "cueStartTop"])
+    for (const id of [
+      "cueStart",
+      "cueEnd",
+      "cueJapanese",
+      "cueReading",
+      "cueTranslation",
+      "cueEnabled",
+      "cueStartTop",
+      "cuePart",
+      "partFillDown",
+    ])
       $(id).disabled = !c;
-    if (!c) return;
+    renderPartOptions();
+    if (!c) {
+      for (const id of ["cueStart", "cueEnd", "cueJapanese", "cueReading", "cueTranslation"]) $(id).value = "";
+      $("cueEnabled").checked = $("cueStartTop").checked = false;
+      renderTimingPanel();
+      return;
+    }
+    $("cuePart").value = String(c.part || 0);
     $("cueStart").value = stamp(c.start);
     $("cueEnd").value = stamp(c.end);
     $("cueJapanese").value = c.japanese;
@@ -1299,8 +1337,9 @@
     }
     const koreanFill = type === "read" && !!fillWindow?.windows,
       karaokeText = isJapanese || isReading || koreanFill,
-      primary = isJapanese || isReading ? s.jpPrimary : koreanFill ? s.koreanSungColor : s.koreanColor,
-      secondary = isJapanese || isReading ? s.jpSecondary : isCountdown ? s.jpPrimary : s.koreanColor;
+      part = partColor(scene),
+      primary = isJapanese || isReading ? part || s.jpPrimary : koreanFill ? part || s.koreanSungColor : s.koreanColor,
+      secondary = isJapanese || isReading ? s.jpSecondary : isCountdown ? part || s.jpPrimary : s.koreanColor;
     el.append(makeText(secondary, outline));
     const timing = isJapanese ? karaokeTiming(scene) : null;
     let filled = 0;
@@ -1346,6 +1385,14 @@
   }
   let previewClipId = 0;
 
+  /** 파트(가수)가 지정된 줄은 칠해진 색을 파트 색으로 바꿉니다. */
+  function partColor(scene) {
+    const part = scene?.part;
+    return partNumbers.includes(part) ? project.settings[`part${part}Color`] : null;
+  }
+  function assColorOverride(hex) {
+    return `\\1c${assColor(hex).replace("&H00", "&H")}&`;
+  }
   /** 카운트다운: 남은 초만큼 ● (3 → 2 → 1) */
   function countdownDots(scene, time) {
     if (!scene.countdown || time >= scene.start || time < scene.start - scene.countdown) return "";
@@ -1686,12 +1733,14 @@
         end: scene.end,
         startTop: !!scene.startTop,
         manualEnd: !!scene.manualEnd,
+        part: scene.part || 0,
       };
       if (timing.windows) source.segments = scene.karaokeSegments;
       lines.push(
         `Comment: 0,${stamp(scene.start)},${stamp(scene.displayEnd)},${sourceCommentStyle},,0,0,0,,${encodeURIComponent(JSON.stringify(source))}`,
       );
-      const hasPreview = scene.previewStart < scene.start;
+      const hasPreview = scene.previewStart < scene.start,
+        partOverride = partColor(scene) ? assColorOverride(partColor(scene)) : "";
       if (hasPreview && jpLayer)
         lines.push(
           lineEvent(
@@ -1725,6 +1774,8 @@
               100,
               Array(n).fill("●").join(" "),
               null,
+              false,
+              partOverride,
             ),
           );
       }
@@ -1750,7 +1801,7 @@
               karaokeText ?? layer.text,
               karaokeText ? null : Math.max(1, Math.round((scene.end - scene.start) * 100)),
               !!karaokeText,
-              fadTag(!hasPreview, true),
+              fadTag(!hasPreview, true) + partOverride,
             ),
           );
           const ruby = furiganaLayout(
@@ -1802,7 +1853,7 @@
                 rubyText,
                 null,
                 true,
-                fadTag(!hasPreview, true),
+                fadTag(!hasPreview, true) + partOverride,
               ),
             );
           }
@@ -1839,7 +1890,7 @@
               text,
               null,
               raw,
-              fadTag(true, true),
+              fadTag(true, true) + (fill ? partOverride : ""),
             ),
           );
         }
@@ -2561,6 +2612,10 @@
     fillReading: "한글 발음 칠하기 설정",
     countdown: "카운트다운 설정",
     fillMode: "노래방 채움 방식 변경",
+    cuePart: "줄 파트 변경",
+    part1Name: "파트 이름 변경",
+    part2Name: "파트 이름 변경",
+    part3Name: "파트 이름 변경",
   };
   for (const id of settingIds) historyLabels[id] = historyLabels[id + "Slider"] = "모양 조절 변경";
   for (const id of colorSettingIds) historyLabels[id] = "자막 색 변경";
@@ -2618,7 +2673,7 @@
       const cue = project.cues[selected];
       if (key === "japanese" && furiganaBase(cue.japanese) !== furiganaBase($(id).value)) cue.karaokeSegments = [];
       cue[key] = $(id).value;
-      if (key === "japanese") renderSyllablePanel();
+      if (key === "japanese") renderTimingPanel();
       renderCueList();
       renderPreview();
     };
@@ -3375,11 +3430,15 @@
   function snapshotMark(label = "시간 마킹") {
     recordChange(label);
   }
+  /** 시간 찍기에 쓸 현재 시각. 재생 중이면 탭 지연 보정만큼 앞당깁니다. */
   function mediaMarkTime() {
     const live = Number(audio?.currentTime),
       view = Number(previewTime),
-      value = Number.isFinite(live) && live > 0.001 ? live : view;
-    return Math.max(0, Math.round((Number.isFinite(value) ? value : 0) * 100) / 100);
+      playing = !!audio && audio.paused === false,
+      offset = playing ? (+project.settings.tapOffset || 0) / 1000 : 0;
+    let value = Number.isFinite(live) && live > 0.001 ? live : view;
+    if (!Number.isFinite(value)) value = 0;
+    return Math.max(0, Math.round((value - offset) * 100) / 100);
   }
   function markCurrent() {
     if (!audio || !Number.isFinite(audio.duration)) {
@@ -4167,6 +4226,261 @@
     waveform.setViewStart((cue.start + cue.end) / 2 - waveform.viewSpan / 2);
   };
 
+  // ===================== 파트(가수) =====================
+  function renderPartOptions() {
+    const select = $("cuePart"),
+      current = select.value;
+    select.replaceChildren();
+    for (const [value, label] of [
+      [0, "기본 색"],
+      ...partNumbers.map((n) => [n, project.settings[`part${n}Name`] || `파트 ${n}`]),
+    ]) {
+      const option = document.createElement("option");
+      option.value = String(value);
+      option.textContent = label;
+      select.append(option);
+    }
+    select.value = current || "0";
+    for (const n of partNumbers) $(`part${n}Name`).value = project.settings[`part${n}Name`] || "";
+  }
+  function setCuePart(cues, part) {
+    for (const cue of cues) cue.part = part;
+    renderCueList();
+    renderPreview();
+    scheduleProjectSave();
+  }
+  $("cuePart").onchange = () => {
+    const cue = selectedCue();
+    if (cue) setCuePart([cue], +$("cuePart").value);
+  };
+  $("partFillDown").onclick = () => {
+    const cue = selectedCue();
+    if (!cue) return;
+    const part = +$("cuePart").value,
+      targets = project.cues.slice(selected);
+    recordChange("파트 아래로 모두 지정");
+    setCuePart(targets, part);
+    status(
+      `${selected + 1}번째 줄부터 끝까지 ${targets.length}줄을 “${$("cuePart").selectedOptions[0].textContent}”(으)로 지정했습니다.`,
+    );
+  };
+  for (const n of partNumbers)
+    $(`part${n}Name`).oninput = () => {
+      project.settings[`part${n}Name`] = $(`part${n}Name`).value.trim() || `파트 ${n}`;
+      renderPartOptions();
+      scheduleProjectSave();
+    };
+
+  // ===================== 탭 지연 보정 =====================
+  let calibration = null;
+  /** 0.6초 간격 딸깍 소리 10번에 맞춰 누른 시각과 실제 소리 시각의 차이(중앙값)를 잽니다. */
+  function startTapCalibration() {
+    if (calibration) return finishTapCalibration(true);
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (!Context) {
+      status("이 브라우저에서는 소리 재생을 지원하지 않아 측정할 수 없습니다.", true);
+      return;
+    }
+    if (audio && !audio.paused) audio.pause();
+    const ctx = new Context(),
+      first = ctx.currentTime + 1,
+      beats = Array.from({ length: 10 }, (_, i) => first + i * 0.6);
+    for (const at of beats) {
+      const osc = ctx.createOscillator(),
+        gain = ctx.createGain();
+      osc.frequency.value = 1200;
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(0.6, at + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.06);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(at);
+      osc.stop(at + 0.08);
+    }
+    calibration = {
+      ctx,
+      beats,
+      delays: [],
+      timer: setTimeout(() => finishTapCalibration(false), (1 + 10 * 0.6 + 0.6) * 1000),
+    };
+    $("calibrateTap").textContent = "■ 측정 취소";
+    $("calibrateTap").classList.add("primary");
+    $("tapCalibrationStatus").textContent = "딸깍 소리에 맞춰 아무 키나(또는 이 버튼 아래 영역을) 10번 누르세요.";
+  }
+  function recordCalibrationTap(eventTime) {
+    const c = calibration;
+    if (!c) return;
+    // 이벤트가 생긴 순간의 오디오 시각으로 바꿉니다.
+    const at = c.ctx.currentTime - Math.max(0, performance.now() - eventTime) / 1000,
+      nearest = c.beats.reduce((best, beat) => (Math.abs(beat - at) < Math.abs(best - at) ? beat : best), c.beats[0]),
+      delay = at - nearest;
+    if (Math.abs(delay) > 0.3) return;
+    c.delays.push(delay);
+    $("tapCalibrationStatus").textContent = `${c.delays.length} / 10 · 이번 탭 ${Math.round(delay * 1000)}ms`;
+  }
+  function finishTapCalibration(cancelled) {
+    const c = calibration;
+    if (!c) return;
+    calibration = null;
+    clearTimeout(c.timer);
+    c.ctx.close();
+    $("calibrateTap").textContent = "박자 맞춰 측정";
+    $("calibrateTap").classList.remove("primary");
+    if (cancelled) {
+      $("tapCalibrationStatus").textContent = "측정을 취소했습니다.";
+      return;
+    }
+    if (c.delays.length < 4) {
+      $("tapCalibrationStatus").textContent = "탭이 너무 적어 측정하지 못했습니다. 다시 시도해 주세요.";
+      return;
+    }
+    const sorted = [...c.delays].sort((a, b) => a - b),
+      median = sorted[Math.floor(sorted.length / 2)],
+      value = Math.max(-300, Math.min(500, Math.round((median * 1000) / 10) * 10));
+    recordChange("탭 지연 보정 측정");
+    project.settings.tapOffset = value;
+    renderSettings();
+    scheduleProjectSave();
+    $("tapCalibrationStatus").textContent =
+      `측정 결과 ${value}ms 늦게 누르고 있습니다. 재생 중 찍는 시간에서 이만큼 빼서 저장합니다.`;
+    status(`탭 지연 보정을 ${value}ms로 설정했습니다.`);
+  }
+  $("calibrateTap").onclick = startTapCalibration;
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (!calibration) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.key === "Escape") finishTapCalibration(true);
+      else if (!event.repeat) recordCalibrationTap(event.timeStamp);
+    },
+    true,
+  );
+  $("tapCalibrationPad").addEventListener("pointerdown", (event) => {
+    if (calibration) recordCalibrationTap(event.timeStamp);
+  });
+
+  // ===================== 찾아 바꾸기 =====================
+  $("replaceAll").onclick = () => {
+    const find = $("findText").value,
+      replacement = $("replaceText").value,
+      target = $("replaceTarget").value,
+      fields = target === "all" ? ["japanese", "reading", "translation"] : [target];
+    if (!find) {
+      status("찾을 말을 입력해 주세요.", true);
+      return;
+    }
+    let count = 0;
+    for (const cue of project.cues) for (const key of fields) count += cue[key].split(find).length - 1;
+    if (!count) {
+      status(`“${find}”을(를) 찾지 못했습니다.`);
+      return;
+    }
+    recordChange("찾아 바꾸기");
+    let lostSyllables = 0;
+    for (const cue of project.cues)
+      for (const key of fields) {
+        if (!cue[key].includes(find)) continue;
+        const next = cue[key].split(find).join(replacement);
+        if (key === "japanese" && validSegments(cue) && furiganaBase(next) !== furiganaBase(cue.japanese)) {
+          cue.karaokeSegments = [];
+          lostSyllables++;
+        }
+        cue[key] = next;
+      }
+    renderCueList();
+    renderEditor();
+    renderPreview();
+    scheduleProjectSave();
+    status(
+      `${count}곳을 바꿨습니다.` +
+        (lostSyllables ? ` 원문이 바뀐 ${lostSyllables}줄은 음절 타이밍을 다시 맞춰 주세요.` : ""),
+    );
+  };
+
+  // ===================== 앱 설치·오프라인 =====================
+  // GitHub Pages(https)나 localhost에서 열었을 때만 동작합니다. 파일로 직접 연 경우에는 건너뜁니다.
+  if (
+    "serviceWorker" in navigator &&
+    (location.protocol === "https:" || location.hostname === "localhost") &&
+    !selfTestMode
+  )
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  let installPrompt = null;
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    installPrompt = event;
+    $("installApp").hidden = false;
+  });
+  window.addEventListener("appinstalled", () => {
+    installPrompt = null;
+    $("installApp").hidden = true;
+    status("앱으로 설치했습니다. 바탕화면이나 시작 메뉴에서 바로 열 수 있습니다.");
+  });
+  $("installApp").onclick = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice.catch(() => null);
+    installPrompt = null;
+    $("installApp").hidden = true;
+  };
+
+  // ===================== 곡 목록 백업 =====================
+  $("exportLibrary").onclick = () => {
+    saveProjectState();
+    const songs = readLibrary()
+      .map((entry) => {
+        try {
+          return JSON.parse(localStorage.getItem(projectKeyPrefix + entry.id));
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    if (!songs.length) {
+      status("백업할 곡이 없습니다.", true);
+      return;
+    }
+    const day = new Date(),
+      stampText = `${day.getFullYear()}${pad2(day.getMonth() + 1)}${pad2(day.getDate())}`;
+    download(
+      `노래방-곡-목록-백업-${stampText}.json`,
+      JSON.stringify({ type: "two-row-karaoke-library", version: 1, exported: day.toISOString(), songs }, null, 2),
+      "application/json;charset=utf-8",
+    );
+    status(`${songs.length}곡을 백업 파일로 저장했습니다.`);
+  };
+  $("importLibrary").onchange = async (event) => {
+    const file = event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text()),
+        incoming = Array.isArray(data?.songs) ? data.songs : Array.isArray(data?.cues) ? [data] : null;
+      if (!incoming) throw Error("곡 목록 백업 파일이나 프로젝트 파일이 아닙니다.");
+      saveProjectState();
+      const library = readLibrary();
+      let added = 0;
+      incoming.forEach((song, index) => {
+        try {
+          const normalized = normalizeProject(song),
+            id = newProjectId() + index;
+          localStorage.setItem(projectKeyPrefix + id, JSON.stringify(normalized));
+          library.push({ id, name: normalized.name, updated: Date.now() - index - 1, lines: normalized.cues.length });
+          added++;
+        } catch {}
+      });
+      writeLibrary(library);
+      renderLibrary();
+      status(
+        `${added}곡을 ‘내 곡 목록’에 추가했습니다.${added < incoming.length ? ` (${incoming.length - added}곡은 읽지 못함)` : ""}`,
+        !added,
+      );
+    } catch (error) {
+      status(`백업을 불러오지 못했습니다: ${error.message}`, true);
+    }
+  };
+
   // ===================== 곡 목록 =====================
   /** 지금 곡을 저장해 두고, 이어서 만들 내용은 새 곡으로 목록에 추가합니다. */
   function startNewSong(label) {
@@ -4318,6 +4632,26 @@
       ])
         if (kanaToHangul(source).text !== expected) throw Error("Reading generation failed: " + source);
       if (!kanaToHangul("聞こえる").error) throw Error("Missing furigana not detected");
+      // --- 파트 색·탭 지연 보정 ---
+      project.cues[1].part = 2;
+      const partAss = buildAss();
+      project.cues[1].part = 0;
+      if (
+        !/,Japanese,,0,0,0,,\{[^}]*\\1c&HD9B3FF&\}\{\\kf30\}小/.test(partAss) ||
+        !/Furigana,,0,0,0,,\{[^}]*\\1c&HD9B3FF&\}\{\\k\d+\}\{\\kf\d+\}こえ/.test(partAss) ||
+        /,Japanese,,0,0,0,,\{[^}]*\\1c/.test(buildAss()) ||
+        parseAss(partAss).cues[1].part !== 2
+      )
+        throw Error("Part color export failed");
+      const savedAudio = audio;
+      audio = { duration: 30, currentTime: 5, paused: false };
+      project.settings.tapOffset = 150;
+      const compensated = mediaMarkTime();
+      audio.paused = true;
+      const pausedMark = mediaMarkTime();
+      project.settings.tapOffset = 0;
+      audio = savedAudio;
+      if (compensated !== 4.85 || pausedMark !== 5) throw Error("Tap offset failed");
       // --- LRC·SRT ---
       const lrc = buildLrc(),
         srt = buildSrt();

@@ -14,7 +14,7 @@ if (-not (Test-Path '.git')) {
 }
 $existing = git remote 2>$null
 if ($existing -contains 'origin') { git remote set-url origin $RepositoryUrl } else { git remote add origin $RepositoryUrl }
-git add index.html style.css app.js karaoke-text.js waveform.js tools .nojekyll README.md DEPLOYMENT.md
+git add index.html style.css app.js karaoke-text.js waveform.js manifest.webmanifest sw.js icons tools .nojekyll README.md DEPLOYMENT.md
 git diff --cached --quiet
 $hasChanges = $LASTEXITCODE -ne 0
 if ($hasChanges) {
