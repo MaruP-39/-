@@ -11,6 +11,8 @@
     segmentWindows,
     kfDurations,
     evenSegments,
+    kanaToHangul,
+    alignReading,
     segmentsFromBoundaries,
     segmentsFromAssKaraoke,
   } = window.KaraokeText;
@@ -25,6 +27,8 @@
     jpPrimary: "#FFE9B8",
     jpSecondary: "#FFFFFF",
     koreanColor: "#FFFFFF",
+    koreanSungColor: "#FFE9B8",
+    fillReading: true,
     jpOutlineColor: "#7A5429",
     koreanOutlineColor: "#303030",
     outlineWidth: 5,
@@ -110,7 +114,14 @@
     waveEdit = null,
     syllableTap = null;
   const settingIds = Object.keys(defaults).filter((id) => typeof defaults[id] === "number");
-  const colorSettingIds = ["jpPrimary", "jpSecondary", "koreanColor", "jpOutlineColor", "koreanOutlineColor"];
+  const colorSettingIds = [
+    "jpPrimary",
+    "jpSecondary",
+    "koreanColor",
+    "koreanSungColor",
+    "jpOutlineColor",
+    "koreanOutlineColor",
+  ];
   // ---- 화면 요소 참조 (구조는 index.html에 있음) ----
   const autoSaveState = $("autoSaveState"),
     historyToggle = $("historyToggle"),
@@ -920,6 +931,7 @@
     $("autoStartTopAfterGap").checked = project.settings.autoStartTopAfterGap !== false;
     $("showTranslation").checked = !!project.settings.showTranslation;
     $("centerKorean").checked = !!project.settings.centerKorean;
+    $("fillReading").checked = project.settings.fillReading !== false;
     $("originalBold").checked = !!project.settings.originalBold;
     $("koreanBold").checked = !!project.settings.koreanBold;
     $("precisionEdit").checked = project.settings.precisionEdit !== false;
@@ -1097,6 +1109,41 @@
       windows: segments && scene.end > scene.start ? segmentWindows(segments, scene.start, scene.end) : null,
     };
   }
+  /**
+   * 한글 발음 줄의 노래방 진행 정보. 발음 글자마다 원문 위치를 찾아(자동 발음과 정렬)
+   * 그 원문이 불리는 시각에 칠해지게 합니다. filledWidth와 같은 형태로 돌려줍니다.
+   */
+  function readingTiming(scene) {
+    if (!project.settings.fillReading || !scene.reading?.trim() || !(scene.end > scene.start)) return null;
+    const timing = karaokeTiming(scene),
+      baseLength = Math.max(1, [...furiganaBase(scene.japanese)].length),
+      auto = kanaToHangul(scene.japanese),
+      positions = alignReading(auto.error ? null : auto, scene.reading, baseLength),
+      chars = [...scene.reading],
+      pieces = [];
+    let k = 0;
+    chars.forEach((ch, index) => {
+      if (!ch.trim()) {
+        if (pieces.length) pieces[pieces.length - 1].baseEnd = index + 1;
+        return;
+      }
+      const at = positions[k++],
+        time = timing.windows
+          ? timeAtBase(timing, at, 0)
+          : timing.start + (timing.end - timing.start) * Math.min(1, at / baseLength);
+      pieces.push({ start: time, baseStart: pieces.length ? index : 0, baseEnd: index + 1 });
+    });
+    if (!pieces.length) return null;
+    pieces[pieces.length - 1].baseEnd = chars.length;
+    pieces[0].start = timing.start;
+    for (let i = 0; i < pieces.length; i++) {
+      pieces[i].start = Math.max(pieces[i].start, i ? pieces[i - 1].start : timing.start);
+      pieces[i].end = i + 1 < pieces.length ? Math.max(pieces[i].start, pieces[i + 1].start) : timing.end;
+      pieces[i].text = chars.slice(pieces[i].baseStart, pieces[i].baseEnd).join("");
+    }
+    for (let i = 0; i < pieces.length - 1; i++) pieces[i].end = Math.max(pieces[i].start, pieces[i + 1].start);
+    return { start: timing.start, end: timing.end, windows: pieces };
+  }
   /** 원문 글자 위치(baseIndex)가 칠해지기 시작하는 시각 */
   function timeAtBase(timing, baseIndex, fraction) {
     if (!timing.windows) return timing.start + (timing.end - timing.start) * fraction;
@@ -1183,13 +1230,15 @@
       shade.setAttribute("opacity", ".5");
       el.append(shade);
     }
-    const karaokeText = isJapanese || isReading,
-      primary = karaokeText ? s.jpPrimary : s.koreanColor,
-      secondary = karaokeText ? s.jpSecondary : s.koreanColor;
+    const koreanFill = type === "read" && !!fillWindow?.windows,
+      karaokeText = isJapanese || isReading || koreanFill,
+      primary = isJapanese || isReading ? s.jpPrimary : koreanFill ? s.koreanSungColor : s.koreanColor,
+      secondary = isJapanese || isReading ? s.jpSecondary : s.koreanColor;
     el.append(makeText(secondary, outline));
     const timing = isJapanese ? karaokeTiming(scene) : null;
     let filled = 0;
     if (isJapanese) filled = filledWidth(timing, text, font, fontFamily, spacing, width, previewTime);
+    else if (koreanFill) filled = filledWidth(fillWindow, text, font, fontFamily, 0, width, previewTime);
     else if (isReading && fillWindow) {
       if (previewTime >= fillWindow.end) filled = width;
       else if (previewTime > fillWindow.start)
@@ -1300,6 +1349,7 @@
           layer.font,
           layer.scale,
           layer.fontFamily,
+          layer.key === "reading" ? readingTiming(scene) : null,
         );
       }
     }
@@ -1466,7 +1516,7 @@
         "Pronunciation",
         s.koreanFont,
         f.read,
-        assColor(s.koreanColor),
+        assColor(s.fillReading ? s.koreanSungColor : s.koreanColor),
         assColor(s.koreanColor),
         assColor(s.koreanOutlineColor),
         s.outlineWidth,
@@ -1587,7 +1637,26 @@
               rubyText = `${delay ? `{\\k${delay}}` : ""}{\\kf${fill}}${assText(reading.text)}`;
             lines.push(lineEvent(2, scene.start, scene.displayEnd, "Furigana", 8, rx, ry, rs, rubyText, null, true));
           }
-        } else
+        } else {
+          // 한글 발음: 줄이 시작될 때까지 빈 \k로 기다린 뒤 글자마다 \kf로 칠합니다.
+          const fill = layer.key === "reading" ? readingTiming(scene) : null;
+          let text = layer.text,
+            raw = false;
+          if (fill) {
+            const wait = Math.max(0, Math.round((scene.start - scene.previewStart) * 100));
+            let previous = 0;
+            text =
+              (wait ? `{\\k${wait}}` : "") +
+              fill.windows
+                .map((piece) => {
+                  const edge = Math.round((piece.end - scene.start) * 100),
+                    value = Math.max(0, edge - previous);
+                  previous = Math.max(previous, edge);
+                  return `{\\kf${value}}${assText(piece.text)}`;
+                })
+                .join("");
+            raw = true;
+          }
           lines.push(
             lineEvent(
               1,
@@ -1598,10 +1667,12 @@
               layerX,
               layer.y,
               layer.scale,
-              layer.text,
+              text,
               null,
+              raw,
             ),
           );
+        }
       }
     }
     return lines.join("\r\n") + "\r\n";
@@ -2253,6 +2324,7 @@
     showMilliseconds: "재생 시간 표시 설정",
     showTranslation: "한국어 뜻 표시 설정",
     centerKorean: "한글 자막 정렬 변경",
+    fillReading: "한글 발음 칠하기 설정",
   };
   for (const id of settingIds) historyLabels[id] = historyLabels[id + "Slider"] = "모양 조절 변경";
   for (const id of colorSettingIds) historyLabels[id] = "자막 색 변경";
@@ -2589,6 +2661,11 @@
   };
   $("showTranslation").onchange = () => {
     project.settings.showTranslation = $("showTranslation").checked;
+    renderPreview();
+    scheduleProjectSave();
+  };
+  $("fillReading").onchange = () => {
+    project.settings.fillReading = $("fillReading").checked;
     renderPreview();
     scheduleProjectSave();
   };
@@ -3343,6 +3420,64 @@
     renderPreview();
   });
   new ResizeObserver(renderPreview).observe($("preview"));
+  // ===================== 한글 발음 자동 생성 =====================
+  /** 한 줄의 발음을 만듭니다. 성공하면 문자열, 후리가나 없는 한자가 있으면 그 한자 목록 */
+  function generateReading(cue) {
+    const result = kanaToHangul(cue.japanese);
+    return result.error ? { kanji: result.kanji } : { text: result.text };
+  }
+  function missingKanjiMessage(kanji) {
+    return `후리가나가 없는 한자(${kanji.slice(0, 6).join(" ")}${kanji.length > 6 ? " …" : ""})가 있습니다. 「자동 후리가나」를 먼저 눌러 주세요.`;
+  }
+  $("autoReadingOne").onclick = () => {
+    const cue = selectedCue();
+    if (!cue?.japanese.trim()) {
+      status("일본어 가사가 있는 줄을 선택해 주세요.", true);
+      return;
+    }
+    const result = generateReading(cue);
+    if (result.kanji) {
+      status(missingKanjiMessage(result.kanji), true);
+      return;
+    }
+    if (result.text === cue.reading) {
+      status("이미 자동 생성 결과와 같은 발음입니다.");
+      return;
+    }
+    recordChange("한글 발음 자동 생성");
+    cue.reading = result.text;
+    renderCueList();
+    renderEditor();
+    renderPreview();
+    scheduleProjectSave();
+    status(`발음을 만들었습니다: ${result.text}`);
+  };
+  $("autoReadingEmpty").onclick = () => {
+    const targets = project.cues.filter((cue) => cue.enabled && cue.japanese.trim() && !cue.reading.trim());
+    if (!targets.length) {
+      status("발음이 비어 있는 줄이 없습니다.");
+      return;
+    }
+    const results = targets.map((cue) => [cue, generateReading(cue)]),
+      ready = results.filter(([, result]) => result.text),
+      skipped = results.filter(([, result]) => result.kanji);
+    if (ready.length) {
+      recordChange("빈 한글 발음 자동 생성");
+      for (const [cue, result] of ready) cue.reading = result.text;
+      renderCueList();
+      renderEditor();
+      renderPreview();
+      scheduleProjectSave();
+    }
+    status(
+      `${ready.length}줄의 발음을 만들었습니다.` +
+        (skipped.length
+          ? ` 후리가나가 없는 한자가 있는 ${skipped.length}줄은 건너뛰었습니다. 「모든 줄 자동 후리가나」를 먼저 눌러 주세요.`
+          : ""),
+      !ready.length,
+    );
+  };
+
   // ===================== 음절 타이밍 =====================
   /** 줄 시작·끝을 바꿔도 안쪽 음절 경계의 실제 시각은 그대로 두기 위해 기억합니다. */
   function segmentBoundaries(cue) {
@@ -3824,13 +3959,27 @@
         segmentCopy = JSON.parse(JSON.stringify(segmentCue));
       if (
         !splitCue(1, 4) ||
-        project.cues[1].japanese !== "小さな[声|こえ]" ||
+        project.cues[1].japanese !== "[小|ちい]さな[声|こえ]" ||
         project.cues[1].end !== 5.65 ||
         project.cues[2].start !== 5.65 ||
         project.cues[2].karaokeSegments.length !== 5
       )
         throw Error("Syllable-aware split failed");
       project.cues.splice(1, 2, segmentCopy);
+      for (const [source, expected] of [
+        ["つまらない[話|はなし]でも[笑|わら]った", "츠마라나이 하나시데모 와랏타"],
+        ["ママに[可愛|かわい]いって[言|い]われて[育|そだ]った", "마마니 카와이잇테 이와레테 소닷타"],
+        ["トーキョー・ヴィーナスが[渋谷|しぶや]のヴィジョンから", "토오쿄오 비이나스가 시부야노 비죤카라"],
+        ["[思|おも]う", "오모우"],
+      ])
+        if (kanaToHangul(source).text !== expected) throw Error("Reading generation failed: " + source);
+      if (!kanaToHangul("聞こえる").error) throw Error("Missing furigana not detected");
+      const readingFill = readingTiming(activeScenes()[1]),
+        koPiece = readingFill?.windows.find((piece) => piece.text.startsWith("코"));
+      if (!koPiece || Math.abs(koPiece.start - 5.2) > 0.001 || readingFill.windows[0].start !== 4.2)
+        throw Error("Reading fill timing failed");
+      if (!/Pronunciation,,0,0,0,,\{[^}]*\}\{\\k250\}\{\\kf\d+\}치/.test(ass))
+        throw Error("Reading karaoke export failed");
       if (
         parseTimeInput("1:23.45") !== 83.45 ||
         parseTimeInput("0:01:02.5") !== 62.5 ||

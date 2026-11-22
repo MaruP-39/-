@@ -130,6 +130,13 @@
                 </div>
               </div>
               <label class="field wide">한글 발음<textarea id="cueReading"></textarea></label>
+              <div class="wide reading-tools">
+                <div class="toolbar">
+                  <button type="button" id="autoReadingOne" class="small">선택 줄 발음 자동 생성</button>
+                  <button type="button" id="autoReadingEmpty" class="small">발음이 빈 줄 모두 생성</button>
+                </div>
+                <p class="note">가나와 후리가나를 읽어 한글 발음을 만듭니다. 후리가나가 없는 한자가 있으면 「자동 후리가나」를 먼저 눌러 주세요.</p>
+              </div>
               <label class="field wide">한국어 뜻<textarea id="cueTranslation"></textarea></label>
               <label class="check wide"><input id="cueEnabled" type="checkbox" />이 줄을 노래방 자막에 포함</label>
               <label class="check wide"><input id="cueStartTop" type="checkbox" />이 줄부터 위 줄에서 새로 시작 (간주 뒤)</label>
@@ -339,6 +346,7 @@
             <div class="option-stack">
               <label class="check"><input id="showTranslation" type="checkbox" />한국어 뜻도 화면과 ASS에 표시</label>
               <label class="check"><input id="centerKorean" type="checkbox" />한글 자막을 화면 가운데 정렬</label>
+              <label class="check"><input id="fillReading" type="checkbox" />한글 발음도 노래에 맞춰 칠하기</label>
             </div>
 
             <h3 class="sub">자막 쌓는 순서</h3>
@@ -370,7 +378,8 @@
             <div class="slider-grid colors">
               <label class="field">일본어 완료 색<input id="jpPrimary" type="color" /></label>
               <label class="field">일본어 대기 색<input id="jpSecondary" type="color" /></label>
-              <label class="field">한글 색<input id="koreanColor" type="color" /></label>
+              <label class="field">한글 대기 색<input id="koreanColor" type="color" /></label>
+              <label class="field">한글 완료 색<input id="koreanSungColor" type="color" /></label>
               <label class="field">일본어 외곽선 색<input id="jpOutlineColor" type="color" /></label>
               <label class="field">한글 외곽선 색<input id="koreanOutlineColor" type="color" /></label>
             </div>
@@ -1172,7 +1181,7 @@
 <option value="휴먼옛체"></option>
 <option value="휴먼편지체"></option></datalist>
     <script id="example-data" type="application/json">
-{"name": "예제 · 새벽의 노래", "settings": {"leftMargin": 120, "rightMargin": 120, "topY": 430, "rowGap": 330, "jpSize": 84, "readingSize": 70, "translationSize": 66, "previewLead": 2.5, "showTranslation": false}, "cues": [{"id": 1, "start": 1.0, "end": 4.2, "japanese": "夜明け前の[空|そら]を見てた", "reading": "요아케 마에노 소라오 미테타", "translation": "동트기 전의 하늘을 보고 있었어", "enabled": true}, {"id": 2, "start": 4.2, "end": 7.4, "japanese": "小さな[声|こえ]で歌ってた", "reading": "치이사나 코에데 우탓테타", "translation": "작은 목소리로 노래하고 있었어", "enabled": true, "karaokeSegments": [{"text": "小", "duration": 30}, {"text": "さ", "duration": 30}, {"text": "な", "duration": 40}, {"text": "声", "duration": 45}, {"text": "で", "duration": 30}, {"text": "歌", "duration": 40}, {"text": "っ", "duration": 25}, {"text": "て", "duration": 30}, {"text": "た", "duration": 50}]}, {"id": 3, "start": 7.4, "end": 10.6, "japanese": "誰にも[届|とど]かなくていい", "reading": "다레니모 토도카나쿠테 이이", "translation": "누구에게도 닿지 않아도 괜찮아", "enabled": true}, {"id": 4, "start": 10.6, "end": 13.8, "japanese": "それでも[明日|あした]は来るから", "reading": "소레데모 아시타와 쿠루카라", "translation": "그래도 내일은 오니까", "enabled": true}, {"id": 5, "start": 13.8, "end": 15.8, "japanese": "ねえ、聞こえる？", "reading": "네에, 키코에루?", "translation": "있잖아, 들려?", "enabled": true, "karaokeSegments": [{"text": "ね", "duration": 30}, {"text": "え、", "duration": 50}, {"text": "聞", "duration": 35}, {"text": "こ", "duration": 25}, {"text": "え", "duration": 25}, {"text": "る？", "duration": 35}]}, {"id": 6, "start": 15.8, "end": 18.8, "japanese": "胸の[奥|おく]で鳴るメロディー", "reading": "무네노 오쿠데 나루 메로디이", "translation": "가슴 속에서 울리는 멜로디", "enabled": true}, {"id": 7, "start": 21.0, "end": 24.0, "japanese": "ふたりで[描|えが]いた[地図|ちず]", "reading": "후타리데 에가이타 치즈", "translation": "둘이서 그렸던 지도", "enabled": true}, {"id": 8, "start": 24.0, "end": 27.4, "japanese": "まだ[終|お]わらない[物語|ものがたり]", "reading": "마다 오와라나이 모노가타리", "translation": "아직 끝나지 않은 이야기", "enabled": true}]}
+{"name": "예제 · 새벽의 노래", "settings": {"leftMargin": 120, "rightMargin": 120, "topY": 430, "rowGap": 330, "jpSize": 84, "readingSize": 70, "translationSize": 66, "previewLead": 2.5, "showTranslation": false}, "cues": [{"id": 1, "start": 1.0, "end": 4.2, "japanese": "[夜明|よあ]け[前|まえ]の[空|そら]を[見|み]てた", "reading": "요아케 마에노 소라오 미테타", "translation": "동트기 전의 하늘을 보고 있었어", "enabled": true}, {"id": 2, "start": 4.2, "end": 7.4, "japanese": "[小|ちい]さな[声|こえ]で[歌|うた]ってた", "reading": "치이사나 코에데 우탓테타", "translation": "작은 목소리로 노래하고 있었어", "enabled": true, "karaokeSegments": [{"text": "小", "duration": 30}, {"text": "さ", "duration": 30}, {"text": "な", "duration": 40}, {"text": "声", "duration": 45}, {"text": "で", "duration": 30}, {"text": "歌", "duration": 40}, {"text": "っ", "duration": 25}, {"text": "て", "duration": 30}, {"text": "た", "duration": 50}]}, {"id": 3, "start": 7.4, "end": 10.6, "japanese": "[誰|だれ]にも[届|とど]かなくていい", "reading": "다레니모 토도카나쿠테 이이", "translation": "누구에게도 닿지 않아도 괜찮아", "enabled": true}, {"id": 4, "start": 10.6, "end": 13.8, "japanese": "それでも[明日|あした]は[来|く]るから", "reading": "소레데모 아시타와 쿠루카라", "translation": "그래도 내일은 오니까", "enabled": true}, {"id": 5, "start": 13.8, "end": 15.8, "japanese": "ねえ、[聞|き]こえる？", "reading": "네에, 키코에루?", "translation": "있잖아, 들려?", "enabled": true, "karaokeSegments": [{"text": "ね", "duration": 30}, {"text": "え、", "duration": 50}, {"text": "聞", "duration": 35}, {"text": "こ", "duration": 25}, {"text": "え", "duration": 25}, {"text": "る？", "duration": 35}]}, {"id": 6, "start": 15.8, "end": 18.8, "japanese": "[胸|むね]の[奥|おく]で[鳴|な]るメロディー", "reading": "무네노 오쿠데 나루 메로디이", "translation": "가슴 속에서 울리는 멜로디", "enabled": true}, {"id": 7, "start": 21.0, "end": 24.0, "japanese": "ふたりで[描|えが]いた[地図|ちず]", "reading": "후타리데 에가이타 치즈", "translation": "둘이서 그렸던 지도", "enabled": true}, {"id": 8, "start": 24.0, "end": 27.4, "japanese": "まだ[終|お]わらない[物語|ものがたり]", "reading": "마다 오와라나이 모노가타리", "translation": "아직 끝나지 않은 이야기", "enabled": true}]}
     </script>
     <script src="karaoke-text.js"></script>
     <script src="waveform.js"></script>

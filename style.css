@@ -558,8 +558,12 @@ details.more .field {
   width: 100%;
   accent-color: var(--accent-strong);
 }
-.ruby-tools .toolbar {
+.ruby-tools .toolbar,
+.reading-tools .toolbar {
   margin: 0;
+}
+.reading-tools .note {
+  margin-top: 4px;
 }
 .ruby-tools .note {
   margin-top: 4px;
