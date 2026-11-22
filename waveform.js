@@ -22,6 +22,43 @@
     syllable: "#ffd98a",
   };
 
+  /**
+   * 소리가 갑자기 커지는 지점(onset)을 찾습니다. 10ms 단위 로그 에너지의 상승량에서
+   * 주변 평균보다 확실히 큰 봉우리만 고르고, 서로 0.12초 이상 떨어지게 합니다.
+   */
+  function detectOnsets(samples, rate) {
+    const hop = Math.max(1, Math.round(rate * 0.01)),
+      frames = Math.floor(samples.length / hop),
+      energy = new Float32Array(frames);
+    for (let f = 0; f < frames; f++) {
+      let sum = 0;
+      for (let i = f * hop, end = i + hop; i < end; i++) sum += samples[i] * samples[i];
+      energy[f] = Math.log10(Math.sqrt(sum / hop) + 1e-4);
+    }
+    const rise = new Float32Array(frames);
+    for (let f = 3; f < frames; f++)
+      rise[f] = Math.max(0, energy[f] - (energy[f - 1] + energy[f - 2] + energy[f - 3]) / 3);
+    const onsets = [],
+      half = 50; // 주변 ±0.5초 평균
+    let windowSum = 0,
+      last = -Infinity;
+    for (let f = 0; f < Math.min(frames, half); f++) windowSum += rise[f];
+    for (let f = 0; f < frames; f++) {
+      if (f + half < frames) windowSum += rise[f + half];
+      if (f - half - 1 >= 0) windowSum -= rise[f - half - 1];
+      const count = Math.min(frames - 1, f + half) - Math.max(0, f - half) + 1,
+        threshold = (windowSum / count) * 2 + 0.08,
+        value = rise[f];
+      if (value < threshold) continue;
+      let peak = true;
+      for (let k = Math.max(0, f - 3); k <= Math.min(frames - 1, f + 3); k++) if (rise[k] > value) peak = false;
+      if (!peak || f - last < 12) continue;
+      onsets.push((f * hop) / rate);
+      last = f;
+    }
+    return onsets;
+  }
+
   function formatTime(t, step) {
     const sign = t < 0 ? "-" : "";
     t = Math.abs(t);
@@ -38,6 +75,9 @@
       this.host = host;
       this.samples = null;
       this.peaks = null;
+      this.onsets = [];
+      this.snap = true;
+      this.snapped = null;
       this.scale = 1;
       this.viewStart = 0;
       this.viewSpan = 12;
@@ -65,6 +105,7 @@
       this.loadToken++;
       this.samples = null;
       this.peaks = null;
+      this.onsets = [];
       this.render();
     }
 
@@ -73,6 +114,7 @@
       const token = ++this.loadToken;
       this.samples = null;
       this.peaks = null;
+      this.onsets = [];
       this.render();
       if (file.size > MAX_FILE_BYTES) throw Error("파일이 너무 커서 파형을 만들지 않았습니다. (1.5GB 초과)");
       const buffer = await file.arrayBuffer();
@@ -109,6 +151,7 @@
       this.samples = mono;
       this.peaks = peaks;
       this.scale = loudest > 0.001 ? Math.min(8, 0.95 / loudest) : 1;
+      this.onsets = detectOnsets(mono, decoded.sampleRate);
       this.render();
       return true;
     }
@@ -194,6 +237,7 @@
         cues = this.host.getCues(),
         selected = cues.find((c) => c.selected);
       this.drawRuler(ctx, w, h);
+      this.drawOnsets(ctx, w);
       for (const cue of cues) this.drawCue(ctx, cue, h);
       this.drawWave(ctx, w, waveTop, waveBottom, selected);
       for (const cue of cues) this.drawEdges(ctx, cue, h);
@@ -218,6 +262,39 @@
           (waveTop + waveBottom) / 2 + 4,
         );
       }
+    }
+
+    /** 소리 시작점: 눈금 아래 작은 삼각형. 끌어서 붙은 지점은 밝게 */
+    drawOnsets(ctx, w) {
+      if (!this.onsets?.length || this.pxPerSec < 15) return;
+      const from = this.viewStart,
+        to = this.viewStart + this.viewSpan;
+      for (const t of this.onsets) {
+        if (t < from || t > to) continue;
+        const x = this.timeToX(t),
+          hot = this.snapped !== null && Math.abs(this.snapped - t) < 1e-6;
+        ctx.fillStyle = hot ? COLORS.playhead : "rgba(255,207,74,.55)";
+        ctx.beginPath();
+        ctx.moveTo(x - 3.5, RULER - 7);
+        ctx.lineTo(x + 3.5, RULER - 7);
+        ctx.lineTo(x, RULER - 1);
+        ctx.fill();
+      }
+    }
+
+    /** 끌고 있는 시각 근처(화면에서 8px 안)에 소리 시작점이 있으면 그 시각으로 붙입니다. */
+    snapTime(t, event) {
+      this.snapped = null;
+      if (!this.snap || event.altKey || !this.onsets?.length) return t;
+      const limit = 8 / this.pxPerSec;
+      let best = null;
+      for (const onset of this.onsets) {
+        const distance = Math.abs(onset - t);
+        if (distance <= limit && (best === null || distance < Math.abs(best - t))) best = onset;
+      }
+      if (best === null) return t;
+      this.snapped = best;
+      return best;
     }
 
     drawRuler(ctx, w, h) {
@@ -385,7 +462,7 @@
           p.editing = true;
           this.host.beginEdit(p.hit);
         }
-        const t = Math.max(0, this.xToTime(x));
+        const t = Math.max(0, this.snapTime(this.xToTime(x), event));
         if (p.hit.kind === "edge") this.host.dragCueEdge(p.hit.index, p.hit.edge, t);
         else this.host.dragSyllable(p.hit.index, p.hit.boundary, t);
         // 가장자리에 가까우면 자동 스크롤
@@ -404,6 +481,7 @@
       this.pointer = null;
       this.canvas.style.cursor = "";
       if (p.editing) {
+        this.snapped = null;
         this.host.endEdit(cancelled);
         return;
       }

@@ -54,6 +54,11 @@
     translationSize: 66,
     previewLead: 2.5,
     lineHold: 0,
+    fadeIn: 0,
+    fadeOut: 0,
+    fillMode: "sweep",
+    countdown: true,
+    countdownGap: 5,
     showTranslation: false,
     centerKorean: false,
     lyricOrder: ["reading", "japanese", "translation"],
@@ -71,19 +76,59 @@
     resolvedFonts = new Map(),
     fontMetricCache = new Map();
   let auditionEnd = null;
-  function loadSavedProject() {
-    if (selfTestMode) return normalizeProject(initial);
+  // ---- 곡 목록: 곡마다 따로 브라우저에 저장합니다 ----
+  const libraryKey = "two-row-karaoke:library",
+    currentProjectKey = "two-row-karaoke:current",
+    projectKeyPrefix = "two-row-karaoke:project:";
+  let currentProjectId = null;
+  const newProjectId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  function readLibrary() {
     try {
-      const saved = localStorage.getItem(projectStorageKey);
-      return saved ? normalizeProject(JSON.parse(saved)) : normalizeProject(initial);
+      const list = JSON.parse(localStorage.getItem(libraryKey) || "[]");
+      return Array.isArray(list) ? list.filter((item) => item && typeof item.id === "string") : [];
     } catch {
+      return [];
+    }
+  }
+  function writeLibrary(list) {
+    localStorage.setItem(libraryKey, JSON.stringify(list));
+  }
+  function loadSavedProject() {
+    if (selfTestMode) {
+      currentProjectId = "selftest";
       return normalizeProject(initial);
     }
+    try {
+      let library = readLibrary();
+      // 예전 버전(마지막 곡 하나만 저장)의 데이터를 목록으로 옮깁니다. 원래 저장값은 지우지 않습니다.
+      const legacy = !library.length && !localStorage.getItem(libraryKey) && localStorage.getItem(projectStorageKey);
+      if (legacy) {
+        const legacyProject = normalizeProject(JSON.parse(legacy)),
+          id = newProjectId();
+        localStorage.setItem(projectKeyPrefix + id, JSON.stringify(legacyProject));
+        library = [{ id, name: legacyProject.name, updated: Date.now(), lines: legacyProject.cues.length }];
+        writeLibrary(library);
+        localStorage.setItem(currentProjectKey, id);
+      }
+      const wanted = localStorage.getItem(currentProjectKey),
+        entry = library.find((item) => item.id === wanted) || library[0],
+        saved = entry && localStorage.getItem(projectKeyPrefix + entry.id);
+      if (saved) {
+        currentProjectId = entry.id;
+        return normalizeProject(JSON.parse(saved));
+      }
+    } catch {}
+    currentProjectId = newProjectId();
+    return normalizeProject(initial);
   }
   function saveProjectState() {
     if (selfTestMode) return true;
     try {
-      localStorage.setItem(projectStorageKey, JSON.stringify(project));
+      localStorage.setItem(projectKeyPrefix + currentProjectId, JSON.stringify(project));
+      const library = readLibrary().filter((item) => item.id !== currentProjectId);
+      library.unshift({ id: currentProjectId, name: project.name, updated: Date.now(), lines: project.cues.length });
+      writeLibrary(library);
+      localStorage.setItem(currentProjectKey, currentProjectId);
       return true;
     } catch {
       return false;
@@ -180,13 +225,19 @@
       const ok = saveProjectState();
       autoSaveState.textContent = ok ? "자동 저장됨" : "⚠ 자동 저장 실패 · 프로젝트 저장으로 파일에 보관하세요";
       autoSaveState.classList.toggle("error", !ok);
+      if (ok) renderLibrary();
       if (!ok) status("브라우저 저장 공간에 자동 저장하지 못했습니다. ‘프로젝트 저장’으로 파일에 보관해 주세요.", true);
     }, 250);
   }
   function cloneHistoryState() {
-    return JSON.parse(JSON.stringify({ project, selected, previewTime }));
+    return JSON.parse(JSON.stringify({ project, selected, previewTime, projectId: currentProjectId }));
   }
   function applyHistoryState(state) {
+    // 다른 곡으로 바뀌기 전 상태로 되돌리면 그 곡으로 돌아갑니다(새로 만든 곡은 목록에 남음).
+    if (state.projectId && state.projectId !== currentProjectId) {
+      saveProjectState();
+      currentProjectId = state.projectId;
+    }
     project = normalizeProject(state.project);
     selected = Math.max(0, Math.min(state.selected, project.cues.length - 1));
     previewTime = state.previewTime;
@@ -577,6 +628,13 @@
           : 1 - previous.row;
       scene.previewStart = importedPreview ?? automaticPreview;
       scene.displayEnd = scene.end + (scene.manualEnd ? 0 : +project.settings.lineHold || 0);
+      // 긴 간주 뒤에는 ●●● 카운트다운과 함께 줄을 미리 보여 줍니다.
+      const gapBefore = i ? scene.start - previous.end : scene.start;
+      scene.countdown =
+        project.settings.countdown !== false && gapBefore >= Math.max(1, +project.settings.countdownGap || 5)
+          ? Math.min(3, gapBefore - 0.5)
+          : 0;
+      if (scene.countdown) scene.previewStart = Math.min(scene.previewStart, scene.start - scene.countdown);
     }
     for (let i = 0; i < scenes.length; i++) {
       const nextSameRow = scenes.slice(i + 1).find((next) => next.row === scenes[i].row);
@@ -932,6 +990,8 @@
     $("showTranslation").checked = !!project.settings.showTranslation;
     $("centerKorean").checked = !!project.settings.centerKorean;
     $("fillReading").checked = project.settings.fillReading !== false;
+    $("countdown").checked = project.settings.countdown !== false;
+    $("fillMode").value = project.settings.fillMode === "instant" ? "instant" : "sweep";
     $("originalBold").checked = !!project.settings.originalBold;
     $("koreanBold").checked = !!project.settings.koreanBold;
     $("precisionEdit").checked = project.settings.precisionEdit !== false;
@@ -1161,11 +1221,13 @@
       end: timeAtBase(timing, reading.baseTo, reading.fracTo),
     };
   }
+  const instantFill = () => project.settings.fillMode === "instant";
   /** 원문 줄에서 지금까지 칠해진 폭(글자 폭 단위) */
   function filledWidth(timing, text, font, family, spacing, width, time) {
-    if (time <= timing.start) return 0;
+    if (time < timing.start) return 0;
     if (time >= timing.end) return width;
-    if (!timing.windows) return width * ((time - timing.start) / Math.max(0.01, timing.end - timing.start));
+    if (!timing.windows)
+      return instantFill() ? width : width * ((time - timing.start) / Math.max(0.01, timing.end - timing.start));
     const chars = [...text];
     for (const w of timing.windows) {
       if (time >= w.end) continue;
@@ -1173,7 +1235,11 @@
         piece = chars.slice(w.baseStart, w.baseEnd).join(""),
         x0 = before ? textWidth(before, font, family, spacing) + spacing : 0,
         pieceWidth = textWidth(piece, font, family, spacing),
-        frac = Math.min(1, Math.max(0, (time - w.start) / Math.max(0.01, w.end - w.start)));
+        frac = instantFill()
+          ? time >= w.start
+            ? 1
+            : 0
+          : Math.min(1, Math.max(0, (time - w.start) / Math.max(0.01, w.end - w.start)));
       return Math.min(width, x0 + pieceWidth * frac);
     }
     return width;
@@ -1182,7 +1248,8 @@
     const s = project.settings,
       isJapanese = type === "jp",
       isReading = type === "furigana",
-      outline = isJapanese || isReading ? s.jpOutlineColor : s.koreanOutlineColor;
+      isCountdown = type === "countdown",
+      outline = isJapanese || isReading || isCountdown ? s.jpOutlineColor : s.koreanOutlineColor;
     let layout = null;
     if (isJapanese) {
       layout = furiganaLayout(text, x, y, anchor, font, scale, fontFamily, +s.originalSpacing || 0);
@@ -1205,7 +1272,7 @@
       transformOrigin: anchor === 7 ? "top left" : anchor === 8 ? "top center" : "top right",
       transform: `translateX(${anchor === 7 ? "0" : anchor === 8 ? "-50%" : "-100%"}) scaleX(${scale / 100})`,
     });
-    const border = (+s.outlineWidth || 0) * (isReading ? 0.55 : 1),
+    const border = (+s.outlineWidth || 0) * (isReading ? 0.55 : isCountdown ? 0.6 : 1),
       shadow = +s.shadowDepth || 0;
     const makeText = (fill, stroke, offset = 0) => {
       const node = document.createElementNS(ns, "text");
@@ -1233,14 +1300,14 @@
     const koreanFill = type === "read" && !!fillWindow?.windows,
       karaokeText = isJapanese || isReading || koreanFill,
       primary = isJapanese || isReading ? s.jpPrimary : koreanFill ? s.koreanSungColor : s.koreanColor,
-      secondary = isJapanese || isReading ? s.jpSecondary : s.koreanColor;
+      secondary = isJapanese || isReading ? s.jpSecondary : isCountdown ? s.jpPrimary : s.koreanColor;
     el.append(makeText(secondary, outline));
     const timing = isJapanese ? karaokeTiming(scene) : null;
     let filled = 0;
     if (isJapanese) filled = filledWidth(timing, text, font, fontFamily, spacing, width, previewTime);
     else if (koreanFill) filled = filledWidth(fillWindow, text, font, fontFamily, 0, width, previewTime);
     else if (isReading && fillWindow) {
-      if (previewTime >= fillWindow.end) filled = width;
+      if (previewTime >= fillWindow.end || (instantFill() && previewTime >= fillWindow.start)) filled = width;
       else if (previewTime > fillWindow.start)
         filled = width * ((previewTime - fillWindow.start) / Math.max(0.01, fillWindow.end - fillWindow.start));
     }
@@ -1279,6 +1346,28 @@
   }
   let previewClipId = 0;
 
+  /** 카운트다운: 남은 초만큼 ● (3 → 2 → 1) */
+  function countdownDots(scene, time) {
+    if (!scene.countdown || time >= scene.start || time < scene.start - scene.countdown) return "";
+    const step = scene.countdown / 3;
+    return Array(Math.min(3, Math.ceil((scene.start - time) / step - 1e-9)))
+      .fill("●")
+      .join(" ");
+  }
+  function countdownLayout(scene, layers, f, x, anchor) {
+    const size = Math.max(12, Math.round(f.jp * 0.6)),
+      topLayer = layers[0];
+    return { size, x, y: Math.max(0, (topLayer ? topLayer.y : +project.settings.topY) - size - 16), anchor };
+  }
+  /** 페이드 인·아웃 투명도 (미리보기용) */
+  function fadeAlpha(scene, time) {
+    const fadeIn = (+project.settings.fadeIn || 0) / 1000,
+      fadeOut = (+project.settings.fadeOut || 0) / 1000;
+    let alpha = 1;
+    if (fadeIn > 0) alpha = Math.min(alpha, (time - scene.previewStart) / fadeIn);
+    if (fadeOut > 0 && Number.isFinite(scene.displayEnd)) alpha = Math.min(alpha, (scene.displayEnd - time) / fadeOut);
+    return Math.max(0, Math.min(1, alpha));
+  }
   function renderPreview() {
     $("preview")
       .querySelectorAll(".preview-text")
@@ -1331,12 +1420,19 @@
           });
       } else scenes = [];
     }
+    const preview = $("preview");
     for (const scene of scenes) {
       if (previewTime < scene.previewStart || previewTime >= scene.displayEnd) continue;
       const top = +s.topY + scene.row * +s.rowGap,
         anchor = scene.row ? 9 : 7,
         x = scene.row ? 1920 - +s.rightMargin : +s.leftMargin,
-        layers = stackLayout(scene, s, f, top, maxW);
+        layers = stackLayout(scene, s, f, top, maxW),
+        firstNew = preview.children.length;
+      const dots = countdownDots(scene, previewTime);
+      if (dots) {
+        const dot = countdownLayout(scene, layers, f, x, anchor);
+        addText(scene, "countdown", dots, dot.x, dot.y, anchor, dot.size, 100, s.japaneseFont);
+      }
       for (const layer of layers) {
         const centerKorean = s.centerKorean && layer.type !== "jp";
         addText(
@@ -1352,6 +1448,8 @@
           layer.key === "reading" ? readingTiming(scene) : null,
         );
       }
+      const alpha = fadeAlpha(scene, previewTime);
+      if (alpha < 1) for (const el of [...preview.children].slice(firstNew)) el.style.opacity = String(alpha);
     }
     waveform?.render();
     if (!$("syllableWorkspace").hidden) updateSyllableHighlight();
@@ -1449,8 +1547,18 @@
   function assStyle(name, font, size, primary, secondary, outline, outlineWidth, spacing = 0) {
     return `Style: ${name},${String(font || "Arial").replace(/,/g, " ")},${size},${primary},${secondary},${outline},&H80000000,${fontWeight(font) >= 700 ? -1 : 0},0,0,0,100,100,${spacing},0,1,${outlineWidth},${+project.settings.shadowDepth || 0},8,80,80,50,1`;
   }
-  function lineEvent(layer, start, end, style, anchor, x, y, scale, text, kf, raw = false) {
-    const tag = `{\\an${anchor}\\pos(${x},${y})\\fscx${scale}${kf === null ? "" : `\\kf${kf}`}}`;
+  /** \kf(부드럽게 쓸기) 또는 \k(음절마다 한 번에) */
+  function kTag() {
+    return instantFill() ? "\\k" : "\\kf";
+  }
+  /** 페이드 태그. fadeIn/fadeOut false면 그쪽은 0 */
+  function fadTag(fadeIn = true, fadeOut = true) {
+    const a = fadeIn ? Math.round(+project.settings.fadeIn || 0) : 0,
+      b = fadeOut ? Math.round(+project.settings.fadeOut || 0) : 0;
+    return a || b ? `\\fad(${a},${b})` : "";
+  }
+  function lineEvent(layer, start, end, style, anchor, x, y, scale, text, kf, raw = false, extra = "") {
+    const tag = `{\\an${anchor}\\pos(${x},${y})\\fscx${scale}${extra}${kf === null ? "" : `${kTag()}${kf}`}}`;
     return `Dialogue: ${layer},${stamp(start)},${stamp(end)},${style},,0,0,0,,${tag}${raw ? text : assText(text)}`;
   }
   function buildAss() {
@@ -1550,6 +1658,16 @@
         (+s.outlineWidth || 0) * 0.55,
         0,
       ),
+      assStyle(
+        "Countdown",
+        s.japaneseFont,
+        Math.max(12, Math.round(f.jp * 0.6)),
+        assColor(s.jpPrimary),
+        assColor(s.jpPrimary),
+        assColor(s.jpOutlineColor),
+        (+s.outlineWidth || 0) * 0.6,
+        0,
+      ),
       "",
       "[Events]",
       "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -1573,7 +1691,8 @@
       lines.push(
         `Comment: 0,${stamp(scene.start)},${stamp(scene.displayEnd)},${sourceCommentStyle},,0,0,0,,${encodeURIComponent(JSON.stringify(source))}`,
       );
-      if (scene.previewStart < scene.start && jpLayer)
+      const hasPreview = scene.previewStart < scene.start;
+      if (hasPreview && jpLayer)
         lines.push(
           lineEvent(
             0,
@@ -1586,8 +1705,29 @@
             jpLayer.scale,
             jpLayer.text,
             null,
+            false,
+            fadTag(true, false),
           ),
         );
+      if (scene.countdown) {
+        const dot = countdownLayout(scene, layers, f, x, anchor),
+          step = scene.countdown / 3;
+        for (let n = 3; n >= 1; n--)
+          lines.push(
+            lineEvent(
+              3,
+              scene.start - step * n,
+              scene.start - step * (n - 1),
+              "Countdown",
+              anchor,
+              dot.x,
+              Math.round(dot.y),
+              100,
+              Array(n).fill("●").join(" "),
+              null,
+            ),
+          );
+      }
       for (const layer of layers) {
         const centerKorean = s.centerKorean && layer.key !== "japanese",
           layerAnchor = centerKorean ? 8 : anchor,
@@ -1595,7 +1735,7 @@
         if (layer.key === "japanese") {
           const durations = timing.windows ? kfDurations(validSegments(scene), scene.start, scene.end) : null,
             karaokeText = durations
-              ? timing.windows.map((w, i) => `{\\kf${durations[i]}}${assText(w.text)}`).join("")
+              ? timing.windows.map((w, i) => `{${kTag()}${durations[i]}}${assText(w.text)}`).join("")
               : null;
           lines.push(
             lineEvent(
@@ -1610,6 +1750,7 @@
               karaokeText ?? layer.text,
               karaokeText ? null : Math.max(1, Math.round((scene.end - scene.start) * 100)),
               !!karaokeText,
+              fadTag(!hasPreview, true),
             ),
           );
           const ruby = furiganaLayout(
@@ -1628,14 +1769,42 @@
               rs = Math.round(reading.scale * 100) / 100;
             if (scene.previewStart < scene.start)
               lines.push(
-                lineEvent(2, scene.previewStart, scene.start, "FuriganaPreview", 8, rx, ry, rs, reading.text, null),
+                lineEvent(
+                  2,
+                  scene.previewStart,
+                  scene.start,
+                  "FuriganaPreview",
+                  8,
+                  rx,
+                  ry,
+                  rs,
+                  reading.text,
+                  null,
+                  false,
+                  fadTag(true, false),
+                ),
               );
             // 후리가나도 해당 한자가 불릴 때 칠해지도록: 앞부분은 빈 \k로 기다린 뒤 \kf로 채움
             const window = rubyWindow(timing, reading),
               delay = Math.max(0, Math.round((window.start - scene.start) * 100)),
               fill = Math.max(1, Math.round((window.end - scene.start) * 100) - delay),
-              rubyText = `${delay ? `{\\k${delay}}` : ""}{\\kf${fill}}${assText(reading.text)}`;
-            lines.push(lineEvent(2, scene.start, scene.displayEnd, "Furigana", 8, rx, ry, rs, rubyText, null, true));
+              rubyText = `${delay ? `{\\k${delay}}` : ""}{${kTag()}${fill}}${assText(reading.text)}`;
+            lines.push(
+              lineEvent(
+                2,
+                scene.start,
+                scene.displayEnd,
+                "Furigana",
+                8,
+                rx,
+                ry,
+                rs,
+                rubyText,
+                null,
+                true,
+                fadTag(!hasPreview, true),
+              ),
+            );
           }
         } else {
           // 한글 발음: 줄이 시작될 때까지 빈 \k로 기다린 뒤 글자마다 \kf로 칠합니다.
@@ -1652,7 +1821,7 @@
                   const edge = Math.round((piece.end - scene.start) * 100),
                     value = Math.max(0, edge - previous);
                   previous = Math.max(previous, edge);
-                  return `{\\kf${value}}${assText(piece.text)}`;
+                  return `{${kTag()}${value}}${assText(piece.text)}`;
                 })
                 .join("");
             raw = true;
@@ -1670,6 +1839,7 @@
               text,
               null,
               raw,
+              fadTag(true, true),
             ),
           );
         }
@@ -1677,6 +1847,70 @@
     }
     return lines.join("\r\n") + "\r\n";
   }
+  // ===================== LRC · SRT 내보내기 =====================
+  const pad2 = (n) => String(n).padStart(2, "0");
+  function lrcTime(t) {
+    const cs = Math.max(0, Math.round(t * 100));
+    return `${pad2(Math.floor(cs / 6000))}:${pad2(Math.floor((cs % 6000) / 100))}.${pad2(cs % 100)}`;
+  }
+  function srtTime(t) {
+    const ms = Math.max(0, Math.round(t * 1000));
+    return `${pad2(Math.floor(ms / 3600000))}:${pad2(Math.floor((ms % 3600000) / 60000))}:${pad2(Math.floor((ms % 60000) / 1000))},${String(ms % 1000).padStart(3, "0")}`;
+  }
+  /** 음악 플레이어용 LRC. 음절 타이밍이 있는 줄은 <시간>음절 형식(단어 단위 LRC)으로, 한글 발음은 같은 시간의 다음 줄로 넣습니다. */
+  function buildLrc() {
+    const scenes = activeScenes();
+    if (!scenes.length) throw Error("시간이 있는 일본어 가사 줄이 없습니다.");
+    const lines = [`[ti:${project.name.replace(/[\r\n\]]/g, " ")}]`, "[re:두 줄 노래방 자막 만들기]"];
+    scenes.forEach((scene, i) => {
+      const timing = karaokeTiming(scene),
+        text = timing.windows
+          ? timing.windows.map((w) => `<${lrcTime(w.start)}>${w.text}`).join("") + `<${lrcTime(scene.end)}>`
+          : furiganaBase(scene.japanese);
+      lines.push(`[${lrcTime(scene.start)}]${text.replace(/\r?\n/g, " ")}`);
+      if (scene.reading.trim()) lines.push(`[${lrcTime(scene.start)}]${scene.reading.replace(/\r?\n/g, " ")}`);
+      const next = scenes[i + 1];
+      if (!next || next.start - scene.end > 1) lines.push(`[${lrcTime(scene.end)}]`);
+    });
+    return lines.join("\r\n") + "\r\n";
+  }
+  /** 일반 동영상 플레이어용 SRT: 원문 / 한글 발음 / (표시 설정 시) 뜻 */
+  function buildSrt() {
+    const scenes = activeScenes();
+    if (!scenes.length) throw Error("시간이 있는 일본어 가사 줄이 없습니다.");
+    return (
+      scenes
+        .map((scene, i) => {
+          const body = [
+            furiganaBase(scene.japanese),
+            scene.reading,
+            project.settings.showTranslation ? scene.translation : "",
+          ]
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .join("\r\n");
+          return `${i + 1}\r\n${srtTime(scene.start)} --> ${srtTime(scene.displayEnd)}\r\n${body}\r\n`;
+        })
+        .join("\r\n") + "\r\n"
+    );
+  }
+  async function exportText(extension, build, label) {
+    try {
+      const contents = build(),
+        filename = `${basename()}.${extension}`,
+        skipped = incompleteCues().length;
+      if (await writeToWorkspace(filename, contents)) status(`작업 폴더에 ${filename} 파일을 저장했습니다.`);
+      else {
+        download(filename, contents, "text/plain;charset=utf-8");
+        status(`${label} 파일을 다운로드했습니다.`);
+      }
+      if (skipped) status(`${label} 파일을 저장했습니다. 시간이 완성되지 않은 ${skipped}줄은 빠졌습니다.`, true);
+    } catch (error) {
+      status(error.message, true);
+    }
+  }
+  $("exportLrc").onclick = () => exportText("lrc", buildLrc, "LRC");
+  $("exportSrt").onclick = () => exportText("srt", buildSrt, "SRT");
   function download(name, contents, type) {
     const blob = new Blob([contents], { type });
     const url = URL.createObjectURL(blob);
@@ -1695,13 +1929,13 @@
     scheduleProjectSave();
   };
   $("newProject").onclick = () => {
-    recordChange("새 프로젝트 만들기");
+    startNewSong("새 프로젝트 만들기");
     project = { name: "새 노래", cues: [], settings: { ...project.settings }, shortcuts: { ...project.shortcuts } };
     selected = 0;
     previewTime = 0;
     lastMarkedCueId = null;
     renderAll();
-    status("빈 프로젝트를 만들었습니다. 표를 붙여넣거나 가사 한 줄을 추가하세요.");
+    status("새 곡을 만들었습니다. 이전 곡은 ‘내 곡 목록’에 저장되어 있습니다. 가사를 붙여넣거나 한 줄씩 추가하세요.");
   };
   $("addCue").onclick = () => {
     recordChange("가사 줄 추가");
@@ -1913,9 +2147,9 @@
           translation: item.translation,
           enabled: true,
         }));
-        recordChange("가사 붙여넣기");
+        startNewSong("가사 붙여넣기");
         project = {
-          name: "가사 프로젝트",
+          name: [...furiganaBase(cues[0]?.japanese || "")].slice(0, 20).join("").trim() || "가사 프로젝트",
           cues,
           settings: {
             ...project.settings,
@@ -1963,7 +2197,7 @@
       const content = await file.text(),
         isAss = /\.ass$/i.test(file.name),
         parsed = isAss ? parseAss(content) : { name: file.name.replace(/\.srt$/i, ""), cues: parseSrt(content) };
-      recordChange(isAss ? "ASS 불러오기" : "SRT 불러오기");
+      startNewSong(isAss ? "ASS 불러오기" : "SRT 불러오기");
       project = normalizeProject({
         name: parsed.name,
         cues: parsed.cues,
@@ -1986,7 +2220,7 @@
   async function loadProjectFile(file) {
     try {
       const loaded = normalizeProject(JSON.parse(await file.text()));
-      recordChange("프로젝트 불러오기");
+      startNewSong("프로젝트 불러오기");
       project = loaded;
       selected = 0;
       previewTime = project.cues[0]?.start || 0;
@@ -2260,7 +2494,7 @@
         types: [{ description: "노래방 프로젝트", accept: { "application/json": [".json"] } }],
       });
       const loaded = normalizeProject(JSON.parse(await (await handle.getFile()).text()));
-      recordChange("프로젝트 불러오기");
+      startNewSong("프로젝트 불러오기");
       project = loaded;
       selected = 0;
       previewTime = project.cues[0]?.start || 0;
@@ -2325,6 +2559,8 @@
     showTranslation: "한국어 뜻 표시 설정",
     centerKorean: "한글 자막 정렬 변경",
     fillReading: "한글 발음 칠하기 설정",
+    countdown: "카운트다운 설정",
+    fillMode: "노래방 채움 방식 변경",
   };
   for (const id of settingIds) historyLabels[id] = historyLabels[id + "Slider"] = "모양 조절 변경";
   for (const id of colorSettingIds) historyLabels[id] = "자막 색 변경";
@@ -2661,6 +2897,16 @@
   };
   $("showTranslation").onchange = () => {
     project.settings.showTranslation = $("showTranslation").checked;
+    renderPreview();
+    scheduleProjectSave();
+  };
+  $("countdown").onchange = () => {
+    project.settings.countdown = $("countdown").checked;
+    renderPreview();
+    scheduleProjectSave();
+  };
+  $("fillMode").onchange = () => {
+    project.settings.fillMode = $("fillMode").value;
     renderPreview();
     scheduleProjectSave();
   };
@@ -3903,6 +4149,12 @@
       scheduleProjectSave();
     },
   });
+  $("waveSnap").onclick = () => {
+    waveform.snap = !waveform.snap;
+    $("waveSnap").classList.toggle("is-on", waveform.snap);
+    $("waveSnap").setAttribute("aria-pressed", String(waveform.snap));
+    status(waveform.snap ? "경계를 끌 때 소리 시작점에 붙입니다." : "소리 시작점 자석을 껐습니다.");
+  };
   $("waveZoomIn").onclick = () => waveform.zoom(0.6, previewTime);
   $("waveZoomOut").onclick = () => waveform.zoom(1 / 0.6, previewTime);
   $("waveFit").onclick = () => {
@@ -3915,6 +4167,97 @@
     waveform.setViewStart((cue.start + cue.end) / 2 - waveform.viewSpan / 2);
   };
 
+  // ===================== 곡 목록 =====================
+  /** 지금 곡을 저장해 두고, 이어서 만들 내용은 새 곡으로 목록에 추가합니다. */
+  function startNewSong(label) {
+    saveProjectState();
+    recordChange(label);
+    currentProjectId = newProjectId();
+  }
+  function formatSavedTime(value) {
+    const date = new Date(value),
+      pad = (n) => String(n).padStart(2, "0");
+    return Number.isFinite(date.getTime())
+      ? `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+      : "";
+  }
+  function renderLibrary() {
+    const select = $("projectLibrary"),
+      list = readLibrary();
+    if (!list.some((item) => item.id === currentProjectId))
+      list.unshift({ id: currentProjectId, name: project.name, updated: Date.now(), lines: project.cues.length });
+    select.replaceChildren();
+    for (const item of list) {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = `${item.name || "이름 없음"} · ${item.lines ?? "?"}줄 · ${formatSavedTime(item.updated)}`;
+      select.append(option);
+    }
+    select.value = currentProjectId;
+    $("deleteLibraryProject").disabled = selfTestMode;
+  }
+  function resetForSong() {
+    if (syllableTap) stopSyllableTap(false);
+    changeHistory = [];
+    redoHistory = [];
+    selected = 0;
+    previewTime = project.cues.find((cue) => cue.marked)?.start || 0;
+    if (audio && Number.isFinite(audio.duration)) audio.currentTime = previewTime;
+    lastMarkedCueId = null;
+    previewUnmarkedCueId = null;
+    pendingMarkSelection = false;
+    showIncompleteWarnings = false;
+    incompleteCueIds = new Set();
+    renderAll();
+    revealSelectedOnWave();
+  }
+  function openSong(id, saveCurrent = true) {
+    let next;
+    try {
+      next = normalizeProject(JSON.parse(localStorage.getItem(projectKeyPrefix + id)));
+    } catch {
+      status("이 곡을 열 수 없습니다. 저장된 내용이 손상되었습니다.", true);
+      renderLibrary();
+      return false;
+    }
+    if (saveCurrent) saveProjectState();
+    currentProjectId = id;
+    project = next;
+    resetForSong();
+    scheduleProjectSave();
+    return true;
+  }
+  $("projectLibrary").onchange = () => {
+    const id = $("projectLibrary").value;
+    if (id === currentProjectId) return;
+    if (openSong(id)) status(`“${project.name}”을(를) 열었습니다. 영상·음악은 그대로이니 다른 곡이면 다시 불러오세요.`);
+  };
+  $("deleteLibraryProject").onclick = () => {
+    const id = $("projectLibrary").value,
+      list = readLibrary(),
+      entry = list.find((item) => item.id === id) || (id === currentProjectId ? { id, name: project.name } : null);
+    if (!entry) return;
+    if (
+      !confirm(`“${entry.name}”을(를) 곡 목록에서 지울까요?\n이 브라우저에 저장된 내용이 지워지며 되돌릴 수 없습니다.`)
+    )
+      return;
+    try {
+      localStorage.removeItem(projectKeyPrefix + id);
+      writeLibrary(list.filter((item) => item.id !== id));
+    } catch {}
+    if (id === currentProjectId) {
+      const rest = readLibrary();
+      if (!rest.length || !openSong(rest[0].id, false)) {
+        currentProjectId = newProjectId();
+        project = { name: "새 노래", cues: [], settings: { ...project.settings }, shortcuts: { ...project.shortcuts } };
+        resetForSong();
+        scheduleProjectSave();
+      }
+    }
+    renderLibrary();
+    status(`“${entry.name}”을(를) 목록에서 지웠습니다.`);
+  };
+
   function renderAll() {
     $("projectName").value = project.name;
     renderCueList();
@@ -3922,6 +4265,7 @@
     renderSettings();
     renderShortcuts();
     renderHistory();
+    renderLibrary();
     syncSeek();
     renderPreview();
   }
@@ -3974,6 +4318,40 @@
       ])
         if (kanaToHangul(source).text !== expected) throw Error("Reading generation failed: " + source);
       if (!kanaToHangul("聞こえる").error) throw Error("Missing furigana not detected");
+      // --- LRC·SRT ---
+      const lrc = buildLrc(),
+        srt = buildSrt();
+      if (
+        !lrc.includes("[00:04.20]<00:04.20>小<00:04.50>さ<00:04.80>な") ||
+        !lrc.includes("[00:01.00]夜明け前の空を見てた\r\n[00:01.00]요아케 마에노 소라오 미테타") ||
+        !lrc.includes("[00:18.80]\r\n[00:25.00]") ||
+        !srt.startsWith("1\r\n00:00:01,000 --> 00:00:04,200\r\n夜明け前の空を見てた\r\n요아케 마에노 소라오 미테타\r\n")
+      )
+        throw Error("LRC/SRT export failed");
+      // --- 카운트다운·페이드·채움 방식 ---
+      const countdownScene = activeScenes()[6];
+      if (countdownScene.countdown !== 3 || countdownScene.previewStart !== 22 || activeScenes()[5].countdown)
+        throw Error("Countdown scene failed");
+      if (
+        !/Dialogue: 3,0:00:22\.00,0:00:23\.00,Countdown,,0,0,0,,\{\\an7\\pos\(120,\d+\)\\fscx100\}● ● ●/.test(
+          buildAss(),
+        )
+      )
+        throw Error("Countdown export failed");
+      project.settings.fadeIn = 200;
+      project.settings.fadeOut = 300;
+      const faded = buildAss();
+      project.settings.fadeIn = project.settings.fadeOut = 0;
+      if (
+        !/Pronunciation,,0,0,0,,\{[^}]*\\fad\(200,300\)/.test(faded) ||
+        !/,Preview,,0,0,0,,\{[^}]*\\fad\(200,0\)\}/.test(faded)
+      )
+        throw Error("Fade export failed");
+      project.settings.fillMode = "instant";
+      const instant = buildAss();
+      project.settings.fillMode = "sweep";
+      if (!instant.includes("{\\k30}小{\\k30}さ") || /Japanese,,0,0,0,,[^\n]*\\kf/.test(instant))
+        throw Error("Instant fill export failed");
       const readingFill = readingTiming(activeScenes()[1]),
         koPiece = readingFill?.windows.find((piece) => piece.text.startsWith("코"));
       if (!koPiece || Math.abs(koPiece.start - 5.2) > 0.001 || readingFill.windows[0].start !== 4.2)

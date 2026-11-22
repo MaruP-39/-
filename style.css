@@ -323,6 +323,15 @@ label.file input[type="file"] {
   align-items: center;
   margin: 10px 0;
 }
+.library-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.library-row .field {
+  flex: 1;
+}
 .folder-row {
   display: flex;
   align-items: center;

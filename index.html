@@ -33,8 +33,12 @@
         <div class="column">
           <section class="panel">
             <h2><span class="step">1</span>파일과 프로젝트</h2>
+            <div class="library-row">
+              <label class="field">내 곡 목록 <span class="hint">이 브라우저에 곡마다 자동 저장</span><select id="projectLibrary"></select></label>
+              <button id="deleteLibraryProject" class="small danger-ghost">목록에서 삭제</button>
+            </div>
             <div class="button-grid">
-              <button id="newProject">빈 프로젝트</button>
+              <button id="newProject">새 곡 만들기</button>
               <label class="file button">SRT·ASS 불러오기<input id="srtFile" type="file" accept=".srt,.ass,text/plain" /></label>
               <label class="file button">프로젝트 불러오기<input id="projectFile" type="file" accept=".json,application/json" /></label>
               <button id="linkedProjectOpen">프로젝트 열기·연결</button>
@@ -179,12 +183,13 @@
                 <div class="zoom">
                   <button id="waveZoomOut" class="icon" aria-label="파형 축소">−</button>
                   <button id="waveZoomIn" class="icon" aria-label="파형 확대">+</button>
+                  <button id="waveSnap" class="small is-on" aria-pressed="true" title="경계를 끌 때 소리 시작점(노란 삼각형)에 붙입니다. Alt를 누르고 끌면 잠시 끔">🧲 자석</button>
                   <button id="waveFit" class="small">선택 줄 맞춤</button>
                 </div>
               </div>
               <canvas id="waveform" tabindex="0" aria-label="파형 타임라인. 클릭하면 재생 위치 이동, 줄과 음절 경계를 끌어 시간 수정"></canvas>
               <p class="note">
-                클릭: 재생 위치 이동 · 줄 이름 클릭: 줄 선택 · 경계 끌기: 시간 수정 · 빈 곳 끌기/휠: 좌우 이동 · Ctrl+휠: 확대
+                클릭: 재생 위치 이동 · 줄 이름 클릭: 줄 선택 · 경계 끌기: 시간 수정(노란 삼각형 = 소리 시작점에 붙음, Alt로 해제) · 빈 곳 끌기/휠: 좌우 이동 · Ctrl+휠: 확대
               </p>
             </div>
 
@@ -324,8 +329,11 @@
             <div class="button-grid">
               <button id="inspectProject">완성도 검사</button>
               <button id="previewAssExport">ASS 내보내기 전 확인</button>
+              <button id="exportLrc">LRC 다운로드</button>
+              <button id="exportSrt">SRT 다운로드</button>
             </div>
-            <p class="note">완성도 검사는 시간·발음·겹침을 확인합니다. ASS 확인은 실제로 저장될 줄의 표시 시간을 보여줍니다.</p>
+            <p class="note">완성도 검사는 시간·발음·겹침을 확인합니다. ASS 확인은 실제로 저장될 줄의 표시 시간을 보여줍니다.
+              LRC는 음악 플레이어용(음절 시간 포함, 한글 발음은 같은 시간의 다음 줄), SRT는 일반 동영상 플레이어용입니다.</p>
             <div id="inspectionList" class="inspection-list" hidden></div>
             <details class="more">
               <summary>영상에 자막 입히기 (Windows)</summary>
@@ -409,6 +417,18 @@
             <div class="slider-grid">
               <label class="field">다음 줄 미리보기 (초)<input id="previewLead" type="number" min="0" max="8" step="0.5" /></label>
               <label class="field">가사 줄 유지하기 (초)<input id="lineHold" type="number" min="0" max="8" step="0.5" /></label>
+              <label class="field">나타날 때 페이드 (ms)<input id="fadeIn" type="number" min="0" max="1000" step="50" /></label>
+              <label class="field">사라질 때 페이드 (ms)<input id="fadeOut" type="number" min="0" max="1000" step="50" /></label>
+              <label class="field"
+                >노래방 채움 방식<select id="fillMode">
+                  <option value="sweep">부드럽게 쓸기 (\kf)</option>
+                  <option value="instant">음절마다 한 번에 (\k)</option>
+                </select></label
+              >
+              <label class="field">카운트다운 기준 간주 (초)<input id="countdownGap" type="number" min="2" max="30" step="1" /></label>
+            </div>
+            <div class="option-stack inline">
+              <label class="check"><input id="countdown" type="checkbox" />긴 간주 뒤 ●●● 카운트다운 표시</label>
             </div>
             <p class="note">원문 폰트와 자간은 영어·일본어·다음 줄 미리보기에 적용되고 ASS에도 같은 값으로 저장됩니다.</p>
 
@@ -1181,7 +1201,7 @@
 <option value="휴먼옛체"></option>
 <option value="휴먼편지체"></option></datalist>
     <script id="example-data" type="application/json">
-{"name": "예제 · 새벽의 노래", "settings": {"leftMargin": 120, "rightMargin": 120, "topY": 430, "rowGap": 330, "jpSize": 84, "readingSize": 70, "translationSize": 66, "previewLead": 2.5, "showTranslation": false}, "cues": [{"id": 1, "start": 1.0, "end": 4.2, "japanese": "[夜明|よあ]け[前|まえ]の[空|そら]を[見|み]てた", "reading": "요아케 마에노 소라오 미테타", "translation": "동트기 전의 하늘을 보고 있었어", "enabled": true}, {"id": 2, "start": 4.2, "end": 7.4, "japanese": "[小|ちい]さな[声|こえ]で[歌|うた]ってた", "reading": "치이사나 코에데 우탓테타", "translation": "작은 목소리로 노래하고 있었어", "enabled": true, "karaokeSegments": [{"text": "小", "duration": 30}, {"text": "さ", "duration": 30}, {"text": "な", "duration": 40}, {"text": "声", "duration": 45}, {"text": "で", "duration": 30}, {"text": "歌", "duration": 40}, {"text": "っ", "duration": 25}, {"text": "て", "duration": 30}, {"text": "た", "duration": 50}]}, {"id": 3, "start": 7.4, "end": 10.6, "japanese": "[誰|だれ]にも[届|とど]かなくていい", "reading": "다레니모 토도카나쿠테 이이", "translation": "누구에게도 닿지 않아도 괜찮아", "enabled": true}, {"id": 4, "start": 10.6, "end": 13.8, "japanese": "それでも[明日|あした]は[来|く]るから", "reading": "소레데모 아시타와 쿠루카라", "translation": "그래도 내일은 오니까", "enabled": true}, {"id": 5, "start": 13.8, "end": 15.8, "japanese": "ねえ、[聞|き]こえる？", "reading": "네에, 키코에루?", "translation": "있잖아, 들려?", "enabled": true, "karaokeSegments": [{"text": "ね", "duration": 30}, {"text": "え、", "duration": 50}, {"text": "聞", "duration": 35}, {"text": "こ", "duration": 25}, {"text": "え", "duration": 25}, {"text": "る？", "duration": 35}]}, {"id": 6, "start": 15.8, "end": 18.8, "japanese": "[胸|むね]の[奥|おく]で[鳴|な]るメロディー", "reading": "무네노 오쿠데 나루 메로디이", "translation": "가슴 속에서 울리는 멜로디", "enabled": true}, {"id": 7, "start": 21.0, "end": 24.0, "japanese": "ふたりで[描|えが]いた[地図|ちず]", "reading": "후타리데 에가이타 치즈", "translation": "둘이서 그렸던 지도", "enabled": true}, {"id": 8, "start": 24.0, "end": 27.4, "japanese": "まだ[終|お]わらない[物語|ものがたり]", "reading": "마다 오와라나이 모노가타리", "translation": "아직 끝나지 않은 이야기", "enabled": true}]}
+{"name": "예제 · 새벽의 노래", "settings": {"leftMargin": 120, "rightMargin": 120, "topY": 430, "rowGap": 330, "jpSize": 84, "readingSize": 70, "translationSize": 66, "previewLead": 2.5, "showTranslation": false}, "cues": [{"id": 1, "start": 1.0, "end": 4.2, "japanese": "[夜明|よあ]け[前|まえ]の[空|そら]を[見|み]てた", "reading": "요아케 마에노 소라오 미테타", "translation": "동트기 전의 하늘을 보고 있었어", "enabled": true}, {"id": 2, "start": 4.2, "end": 7.4, "japanese": "[小|ちい]さな[声|こえ]で[歌|うた]ってた", "reading": "치이사나 코에데 우탓테타", "translation": "작은 목소리로 노래하고 있었어", "enabled": true, "karaokeSegments": [{"text": "小", "duration": 30}, {"text": "さ", "duration": 30}, {"text": "な", "duration": 40}, {"text": "声", "duration": 45}, {"text": "で", "duration": 30}, {"text": "歌", "duration": 40}, {"text": "っ", "duration": 25}, {"text": "て", "duration": 30}, {"text": "た", "duration": 50}]}, {"id": 3, "start": 7.4, "end": 10.6, "japanese": "[誰|だれ]にも[届|とど]かなくていい", "reading": "다레니모 토도카나쿠테 이이", "translation": "누구에게도 닿지 않아도 괜찮아", "enabled": true}, {"id": 4, "start": 10.6, "end": 13.8, "japanese": "それでも[明日|あした]は[来|く]るから", "reading": "소레데모 아시타와 쿠루카라", "translation": "그래도 내일은 오니까", "enabled": true}, {"id": 5, "start": 13.8, "end": 15.8, "japanese": "ねえ、[聞|き]こえる？", "reading": "네에, 키코에루?", "translation": "있잖아, 들려?", "enabled": true, "karaokeSegments": [{"text": "ね", "duration": 30}, {"text": "え、", "duration": 50}, {"text": "聞", "duration": 35}, {"text": "こ", "duration": 25}, {"text": "え", "duration": 25}, {"text": "る？", "duration": 35}]}, {"id": 6, "start": 15.8, "end": 18.8, "japanese": "[胸|むね]の[奥|おく]で[鳴|な]るメロディー", "reading": "무네노 오쿠데 나루 메로디이", "translation": "가슴 속에서 울리는 멜로디", "enabled": true}, {"id": 7, "start": 25.0, "end": 28.0, "japanese": "ふたりで[描|えが]いた[地図|ちず]", "reading": "후타리데 에가이타 치즈", "translation": "둘이서 그렸던 지도", "enabled": true}, {"id": 8, "start": 28.0, "end": 31.4, "japanese": "まだ[終|お]わらない[物語|ものがたり]", "reading": "마다 오와라나이 모노가타리", "translation": "아직 끝나지 않은 이야기", "enabled": true}]}
     </script>
     <script src="karaoke-text.js"></script>
     <script src="waveform.js"></script>
