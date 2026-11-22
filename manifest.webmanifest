@@ -1,0 +1,16 @@
+{
+  "name": "두 줄 노래방 자막 만들기",
+  "short_name": "노래방 자막",
+  "description": "일본어 노래 가사로 한글 발음·후리가나·음절 노래방 효과가 들어간 두 줄 ASS 자막을 만듭니다.",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0d1420",
+  "theme_color": "#0d1420",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

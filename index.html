@@ -6,6 +6,10 @@
     <title>두 줄 노래방 자막 만들기</title>
     <meta name="description" content="일본어 노래 가사로 한글 발음·후리가나·음절 노래방 효과가 들어간 두 줄 ASS 자막을 만듭니다." />
     <link rel="stylesheet" href="style.css" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="icons/favicon-32.png" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+    <meta name="theme-color" content="#0d1420" />
   </head>
   <body>
     <div class="shell">
@@ -22,6 +26,7 @@
         </div>
         <div class="actions">
           <span id="autoSaveState" class="save-state" role="status">자동 저장 준비</span>
+          <button id="installApp" class="secondary" hidden title="이 사이트를 PC·휴대폰에 앱처럼 설치합니다. 인터넷 없이도 열 수 있습니다.">⬇ 앱으로 설치</button>
           <button id="saveProject" class="secondary">프로젝트 저장</button>
           <button id="saveProjectAs" class="secondary">다른 이름으로 저장</button>
           <button id="exportAss" class="primary">ASS 다운로드</button>
@@ -36,6 +41,10 @@
             <div class="library-row">
               <label class="field">내 곡 목록 <span class="hint">이 브라우저에 곡마다 자동 저장</span><select id="projectLibrary"></select></label>
               <button id="deleteLibraryProject" class="small danger-ghost">목록에서 삭제</button>
+            </div>
+            <div class="toolbar library-backup">
+              <button id="exportLibrary" class="small ghost">모든 곡 백업</button>
+              <label class="file button small ghost">백업 불러오기<input id="importLibrary" type="file" accept=".json,application/json" /></label>
             </div>
             <div class="button-grid">
               <button id="newProject">새 곡 만들기</button>
@@ -121,6 +130,10 @@
             <div class="edit-grid cue-editor">
               <label class="field">시작 시간<input id="cueStart" placeholder="0:00.00" inputmode="decimal" /></label>
               <label class="field">끝 시간<input id="cueEnd" placeholder="0:03.00" inputmode="decimal" /></label>
+              <div class="wide part-row">
+                <label class="field">파트 (가수)<select id="cuePart"></select></label>
+                <button type="button" id="partFillDown" class="small" title="선택한 줄부터 마지막 줄까지 같은 파트로 지정">이 줄부터 아래로 모두</button>
+              </div>
               <label class="field wide">일본어 가사 <span class="hint">후리가나: [漢字|かんじ]</span><textarea id="cueJapanese"></textarea></label>
               <div class="wide ruby-tools">
                 <div class="toolbar">
@@ -145,6 +158,25 @@
               <label class="check wide"><input id="cueEnabled" type="checkbox" />이 줄을 노래방 자막에 포함</label>
               <label class="check wide"><input id="cueStartTop" type="checkbox" />이 줄부터 위 줄에서 새로 시작 (간주 뒤)</label>
             </div>
+            <details class="more">
+              <summary>찾아 바꾸기</summary>
+              <div class="edit-grid">
+                <label class="field">찾을 말<input id="findText" type="text" /></label>
+                <label class="field">바꿀 말<input id="replaceText" type="text" /></label>
+              </div>
+              <div class="toolbar">
+                <label class="inline-field"
+                  >대상<select id="replaceTarget">
+                    <option value="reading">한글 발음</option>
+                    <option value="translation">한국어 뜻</option>
+                    <option value="japanese">일본어 가사</option>
+                    <option value="all">전체</option>
+                  </select></label
+                >
+                <button id="replaceAll" class="small">모두 바꾸기</button>
+              </div>
+              <p class="note">일본어 가사는 후리가나 표기([漢字|かんじ]) 안의 글자도 바뀝니다. 원문이 바뀐 줄은 음절 타이밍이 지워집니다. Ctrl+Z로 되돌릴 수 있습니다.</p>
+            </details>
             <details class="more">
               <summary>여러 줄 한꺼번에 붙여넣기</summary>
               <p class="note">현재 줄 순서대로 한 줄에 한 문장씩 붙여넣습니다. 크레딧 줄은 빈 줄로 순서를 맞추세요.</p>
@@ -312,6 +344,15 @@
                   <label class="check"><input id="showMilliseconds" type="checkbox" />재생 시간에 소수점 표시</label>
                   <label class="check"><input id="autoStartTopAfterGap" type="checkbox" />간주 뒤 첫 줄을 위에서 자동 시작</label>
                 </div>
+                <div class="tap-calibration">
+                  <label class="field">탭 지연 보정 (ms)<input id="tapOffset" type="number" min="-300" max="500" step="10" /></label>
+                  <button id="calibrateTap" class="small">박자 맞춰 측정</button>
+                  <div id="tapCalibrationPad" class="tap-pad" role="button" aria-label="측정용 탭 영역">
+                    <p id="tapCalibrationStatus" class="note">
+                      재생 중에 M·E·K로 찍은 시간에서 이만큼 빼서 저장합니다. 사람은 보통 0.08~0.2초 늦게 누릅니다.
+                    </p>
+                  </div>
+                </div>
                 <p class="note">초기화해도 가사·모양 설정은 유지됩니다.</p>
                 <div class="timing-actions">
                   <button id="resetCurrentMark" class="small danger">현재 줄 시간만 초기화</button>
@@ -390,6 +431,16 @@
               <label class="field">한글 완료 색<input id="koreanSungColor" type="color" /></label>
               <label class="field">일본어 외곽선 색<input id="jpOutlineColor" type="color" /></label>
               <label class="field">한글 외곽선 색<input id="koreanOutlineColor" type="color" /></label>
+            </div>
+            <h3 class="sub">파트(듀엣) 색</h3>
+            <p class="note">줄마다 파트를 지정하면 칠해지는 색이 파트 색으로 바뀝니다. 기본 색인 줄은 위의 일본어·한글 완료 색을 씁니다.</p>
+            <div class="part-grid">
+              <label class="field">파트 1 이름<input id="part1Name" type="text" /></label>
+              <label class="field">색<input id="part1Color" type="color" /></label>
+              <label class="field">파트 2 이름<input id="part2Name" type="text" /></label>
+              <label class="field">색<input id="part2Color" type="color" /></label>
+              <label class="field">파트 3 이름<input id="part3Name" type="text" /></label>
+              <label class="field">색<input id="part3Color" type="color" /></label>
             </div>
             <div class="slider-grid">
               <label class="field">외곽선 굵기<input id="outlineWidth" type="number" min="0" max="12" step="0.5" /></label>
